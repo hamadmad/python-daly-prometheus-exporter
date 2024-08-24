@@ -17,7 +17,7 @@ class DalyBMSBluetooth(DalyBMS):
             self.logger = logger
         else:
             self.logger = logging.getLogger(__name__)
-        DalyBMS.__init__(self, request_retries=request_retries, address=8, logger=logger)
+        DalyBMS.__init__(self, request_retries=request_retries, address=4, logger=logger)
         self.client = None
         self.response_cache = {}
 
@@ -42,8 +42,7 @@ class DalyBMSBluetooth(DalyBMS):
             pass
         self.client = BleakClient(mac_address)
         await self.client.connect()
-        await self.client.start_notify(17, self._notification_callback)
-        await self.client.write_gatt_char(48, bytearray(b""))
+        await self.client.start_notify('0000fff1-0000-1000-8000-00805f9b34fb', self._notification_callback)
 
     async def disconnect(self):
         """
@@ -89,14 +88,14 @@ class DalyBMSBluetooth(DalyBMS):
 
     def _notification_callback(self, handle, data):
         self.logger.debug("%s %s %s" % (handle, repr(data), len(data)))
+        
+        if len(data) % 13 != 0:
+            self.logger.error(len(data), "bytes received, not divisible by 13, not implemented")
+            return
+
         responses = []
-        if len(data) == 13:
-            responses.append(data)
-        elif len(data) == 26:
-            responses.append(data[0:13])
-            responses.append(data[13:])
-        else:
-            self.logger.error(len(data), "bytes received, not 13 or 26, not implemented")
+        for i in range(0, len(data), 13):
+            responses.append(data[i:i + 13])
 
         for response_bytes in responses:
             command = response_bytes[2:3].hex()
@@ -113,7 +112,7 @@ class DalyBMSBluetooth(DalyBMS):
             self.logger.info("Connecting...")
             await self.client.connect()
 
-        await self.client.write_gatt_char(15, value)
+        await self.client.write_gatt_char('0000fff2-0000-1000-8000-00805f9b34fb', value)
         self.logger.debug("Waiting...")
         try:
             result = await asyncio.wait_for(self.response_cache[command]["future"], 5)
@@ -132,9 +131,9 @@ class DalyBMSBluetooth(DalyBMS):
         response_data = await self._read_request("91")
         return super().get_cell_voltage_range(response_data=response_data)
 
-    async def get_max_min_temperature(self, response_data=None):
+    async def get_temperature_range(self, response_data=None):
         response_data = await self._read_request("92")
-        return super().get_max_min_temperature(response_data=response_data)
+        return super().get_temperature_range(response_data=response_data)
 
     async def get_mosfet_status(self, response_data=None):
         response_data = await self._read_request("93")
@@ -147,7 +146,7 @@ class DalyBMSBluetooth(DalyBMS):
     async def get_cell_voltages(self, response_data=None):
         if not self.status:
             await self.get_status()
-        max_responses = self._calc_cell_voltage_responses()
+        max_responses = super()._calc_num_responses(status_field="cells", num_per_frame=3)
         if not max_responses:
             return
         response_data = await self._read_request("95", max_responses=max_responses)
@@ -155,15 +154,23 @@ class DalyBMSBluetooth(DalyBMS):
         return super().get_cell_voltages(response_data=response_data)
 
     async def get_temperatures(self, response_data=None):
-        response_data = await self._read_request("95")
+        if not self.status:
+            await self.get_status()
+        max_responses = super()._calc_num_responses(status_field="temperature_sensors", num_per_frame=7)
+        if not max_responses:
+            return
+        response_data = await self._read_request("96", max_responses=max_responses)
+
         return super().get_temperatures(response_data=response_data)
 
     async def get_balancing_status(self, response_data=None):
-        response_data = await self._read_request("96")
+        if not self.status:
+            await self.get_status()
+        response_data = await self._read_request("97")
         return super().get_balancing_status(response_data=response_data)
 
     async def get_errors(self, response_data=None):
-        response_data = await self._read_request("97")
+        response_data = await self._read_request("98")
         return super().get_errors(response_data=response_data)
 
     async def get_all(self):

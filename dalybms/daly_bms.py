@@ -298,7 +298,10 @@ class DalyBMS:
             response_data = self._read_request("96", max_responses=max_responses, return_list=True)
         if not response_data:
             return False
-
+        
+        if (isinstance(response_data, bytearray)):
+            response_data = [response_data]
+        
         temperatures = self._split_frames(response_data=response_data, status_field="temperature_sensors",
                                           structure=">b 7b")
         for id in temperatures:
@@ -315,11 +318,10 @@ class DalyBMS:
         bits = bin(int(response_data.hex(), base=16))[2:].zfill(48)
         self.logger.info(bits)
         cells = {}
-        for cell in range(1, self.status["cells"] + 1):
-            cells[cell] = bool(int(bits[cell * -1]))
-        self.logger.info(cells)
-        # todo: get sample data and verify result
-        return {"error": "not implemented"}
+        for cell in range(0, self.status["cells"]):
+            cells[cell+1] = bool(int(bits[cell]))
+        self.logger.debug(cells)
+        return cells
 
     def get_errors(self, response_data=None):
         # Battery failure status
